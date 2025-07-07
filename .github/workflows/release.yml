@@ -1,0 +1,165 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Триггер на теги вида v1.0.0, v2.1.3 и т.д.
+  workflow_dispatch:  # Возможность ручного запуска
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-windows
+          - x86-windows
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.12.0  # Укажите нужную версию Zig
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build release
+        run: |
+          zig build -Doptimize=ReleaseSmall -Dtarget=${{ matrix.target }}
+
+      - name: Prepare artifact
+        id: prepare_artifact
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          TARGET=${{ matrix.target }}
+          
+          # Определяем расширение файла
+          EXTENSION=".exe"
+          
+          # Создаем директорию для артефактов
+          mkdir -p release
+          
+          # Копируем исполняемый файл (предполагается, что он называется как имя проекта)
+          # Измените путь к исполняемому файлу согласно вашей структуре проекта
+          cp zig-out/bin/OneDriveDupFixer$EXTENSION release/
+          
+          # Создаем архив для Windows
+          cd release && zip -r "../OneDriveDupFixer-$VERSION-$TARGET.zip" . && cd ..
+          echo "artifact_name=OneDriveDupFixer-$VERSION-$TARGET.zip" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.prepare_artifact.outputs.artifact_name }}
+          path: ${{ steps.prepare_artifact.outputs.artifact_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always() && needs.build.result == 'success'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          find artifacts -name "*.zip" | while read file; do
+            cp "$file" release-files/
+          done
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          
+          # Создаем файл с release notes
+          cat > release_notes.md << EOF
+          # Release $VERSION
+          
+          ## Changes
+          
+          <!-- Добавьте здесь описание изменений или настройте автоматическую генерацию -->
+          
+          ## Downloads
+          
+          Choose the appropriate binary for your platform:
+          
+          - **Windows x86_64**: \`OneDriveDupFixer-$VERSION-x86_64-windows.zip\`
+          - **Windows x86**: \`OneDriveDupFixer-$VERSION-x86-windows.zip\`
+          
+          ## Installation
+          
+          1. Download the appropriate archive for your platform
+          2. Extract the archive
+          3. Move the binary to your PATH (optional)
+          
+          EOF
+          
+          echo "release_notes_file=release_notes.md" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: Release ${{ steps.get_version.outputs.version }}
+          body_path: ${{ steps.release_notes.outputs.release_notes_file }}
+          files: release-files/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Дополнительная проверка для workflow_dispatch
+  create_tag:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create and push tag
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Проверяем, существует ли уже тег
+          if git rev-parse "${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "Tag ${{ inputs.version }} already exists"
+          else
+            git tag "${{ inputs.version }}"
+            git push origin "${{ inputs.version }}"
+            echo "Created and pushed tag ${{ inputs.version }}"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
