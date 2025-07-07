@@ -94,9 +94,13 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p release-files
-          find artifacts -name "*.zip" | while read file; do
+          # Ищем все .zip файлы в поддиректориях artifacts
+          find artifacts -name "*.zip" -type f | while read file; do
             cp "$file" release-files/
           done
+          # Показываем что получилось для отладки
+          echo "Files prepared for release:"
+          ls -la release-files/
 
       - name: Generate release notes
         id: release_notes
