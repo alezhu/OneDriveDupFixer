@@ -1,5 +1,6 @@
 const std = @import("std");
 const utils = @import("utils.zig");
+const compareFiles = @import("file_compare.zig").compareFiles;
 const Progress = @import("progress.zig").Progress;
 const FileEntryMap = @import("file_entry_map.zig").FileEntryMap;
 const FileEntry = @import("file_entry_map.zig").FileEntry;
@@ -248,26 +249,10 @@ pub const Processor = struct {
 
                 if (base_file.modified_time == suffixed_file.modified_time) {
                     if (base_file.size == suffixed_file.size) {
+                        //Compare files by content
+                        const files_is_equal = try compareFiles(self.allocator,base_file.path,suffixed_file.path);
 
-                        // Compare file contents
-                        var arena = std.heap.ArenaAllocator.init(self.allocator);
-                        defer arena.deinit();
-
-                        const allocator = arena.allocator();
-                        const base_data = try allocator.alloc(u8, base_file.size);
-                        _ = std.fs.cwd().readFile(base_file.path, base_data) catch |err| {
-                            self.progress.logLineFmt("Error reading {s}: {}", .{ base_file.path, err });
-                            self.result.errors += 1;
-                            continue;
-                        };
-                        const suffixed_data = try allocator.alloc(u8, suffixed_file.size);
-                        _ = std.fs.cwd().readFile(suffixed_file.path,suffixed_data) catch |err| {
-                            self.progress.logLineFmt("Error reading {s}: {}", .{ suffixed_file.path, err });
-                            self.result.errors += 1;
-                            continue;
-                        };
-
-                        if (std.mem.eql(u8, base_data, suffixed_data)) {
+                        if (files_is_equal) {
                             // Files are identical, delete the suffixed file
                             std.fs.deleteFileAbsolute(suffixed_file.path) catch |err| {
                                 switch (err) {
