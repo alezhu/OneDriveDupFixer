@@ -63,7 +63,7 @@ jobs:
           echo "artifact_name=OneDriveDupFixer-$VERSION-$TARGET.zip" >> $GITHUB_OUTPUT
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.prepare_artifact.outputs.artifact_name }}
           path: ${{ steps.prepare_artifact.outputs.artifact_name }}
